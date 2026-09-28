@@ -1,53 +1,120 @@
 # AI Shop Assistant
 
-Учебный production-проект AI-ассистента интернет-магазина.
+AI-ассистент интернет-магазина с авторизацией пользователей, интеграцией Claude, tool calling, базой данных и оформлением заказов через чат.
 
-Пользователь может зарегистрироваться, войти в аккаунт, общаться с AI-ассистентом, узнавать цены и наличие товаров и создавать заказы через чат.
+**Live demo:** https://ai-shop.podoshlov.com
 
 ## Возможности
 
 - регистрация и авторизация пользователей;
-- безопасное хранение паролей с bcrypt;
+- хранение паролей с bcrypt;
 - JWT access tokens;
-- refresh tokens в HttpOnly cookie;
-- сохранение пользователей, диалогов и заказов в MariaDB;
+- rotating refresh tokens в HttpOnly cookie;
+- восстановление сессии после обновления страницы;
+- персональные чаты пользователей;
 - AI-ассистент на Anthropic Claude;
-- tool calling для получения цены и наличия товара;
-- подтверждение заказа перед созданием;
-- проверка актуальной цены перед заказом;
-- защита от повторного создания заказа;
-- привязка чатов и заказов к пользователю;
+- tool calling для получения цены и остатков;
+- оформление заказа непосредственно через диалог;
+- обязательное подтверждение заказа пользователем;
+- повторная проверка цены перед созданием заказа;
+- транзакционное изменение складских остатков;
+- защита от повторного создания заказа через idempotency key;
+- хранение пользователей, сообщений, товаров и заказов в MariaDB;
+- сохранение данных после перезапуска контейнеров;
 - rate limiting;
-- Helmet security headers;
-- Docker и Docker Compose;
-- persistent MariaDB storage;
-- health endpoint.
+- security headers;
+- database migrations;
+- health checks;
+- Docker Compose;
+- Caddy reverse proxy;
+- HTTPS;
+- deployment на VPS.
 
 ## Стек
+
+### Backend
 
 - Node.js
 - Express
 - Anthropic API
-- MariaDB
 - mysql2
 - bcrypt
 - JSON Web Token
+
+### Database
+
+- MariaDB
+- SQL migrations
+- Docker persistent volumes
+
+### Frontend
+
+- HTML
+- CSS
+- JavaScript
+- Marked
+- DOMPurify
+
+### Infrastructure
+
 - Docker
 - Docker Compose
-- HTML / JavaScript
+- Caddy
+- HTTPS
+- VPS
 
-## Запуск через Docker
+## Как работает заказ
 
-### 1. Создайте `.env`
+```text
+Пользователь
+    ↓
+Claude
+    ↓
+Tool calling
+    ↓
+Проверка товара, цены и наличия
+    ↓
+Подтверждение пользователя
+    ↓
+Повторная проверка актуальных данных
+    ↓
+Транзакция MariaDB
+    ↓
+Создание заказа
+```
 
-Скопируйте:
+Критические операции выполняются серверным кодом. AI не изменяет остатки и не создаёт заказ без подтверждения пользователя.
+
+## Архитектура
+
+```text
+Browser
+   │
+ HTTPS
+   │
+ Caddy
+   │
+ Node.js / Express
+   ├── Anthropic Claude API
+   │
+   └── MariaDB
+        ├── users
+        ├── refresh_tokens
+        ├── sessions
+        ├── messages
+        ├── products
+        └── orders
+```
+
+## Локальный запуск
+
+Создайте `.env` на основе примера:
 
 ```bash
 cp .env.example .env
-
 ```
 
-Затем откройте `.env` и укажите свои значения:
+Укажите необходимые переменные окружения:
 
 ```env
 ANTHROPIC_API_KEY=your_anthropic_api_key
@@ -62,19 +129,13 @@ DOCKER_DB_PASSWORD=your_database_password
 DOCKER_DB_ROOT_PASSWORD=your_root_database_password
 ```
 
-### 2. Запустите приложение
+Запустите приложение:
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-После запуска приложение доступно по адресу:
-
-```text
-http://localhost:3000
-```
-
-### 3. Проверка состояния
+## Health check
 
 ```text
 GET /health
@@ -89,18 +150,34 @@ GET /health
 }
 ```
 
-## База данных
+## Production
 
-При первом запуске Docker автоматически создаёт необходимые таблицы и тестовые товары.
+Приложение развёрнуто на VPS в Docker Compose.
 
-Данные MariaDB хранятся в Docker volume и сохраняются после перезапуска контейнеров.
+Caddy работает как reverse proxy и обслуживает HTTPS. Node.js-контейнер не публикует порт приложения напрямую в интернет.
+
+MariaDB использует persistent Docker volume, поэтому данные сохраняются после перезапуска контейнеров.
+
+**Production:** https://ai-shop.podoshlov.com
 
 ## Безопасность
 
-Файл `.env` не должен попадать в Git.
-
-Для публикации используется `.env.example`, который содержит только названия необходимых переменных без реальных секретов.
+- bcrypt password hashing;
+- short-lived JWT access tokens;
+- rotating refresh tokens;
+- HttpOnly refresh cookie;
+- Secure cookie в production;
+- SameSite cookie protection;
+- rate limiting;
+- Helmet security headers;
+- server-side validation;
+- parameterized SQL queries;
+- разделение пользовательских сессий;
+- idempotent order creation;
+- environment variables для секретов;
+- `.env` исключён из Git;
+- HTTPS.
 
 ## Статус
 
-Проект находится в разработке в рамках обучения production-разработке AI-приложений.
+**MVP завершён и работает в production.**
