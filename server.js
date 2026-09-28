@@ -291,6 +291,16 @@ const chatLimiter = rateLimit({
     }
 });
 
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: "Слишком много попыток. Попробуйте снова через 15 минут."
+    }
+});
+
 app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
 app.use(express.static("public"));
@@ -394,57 +404,67 @@ app.get("/health", async (req, res) => {
         });
     }
 });
-app.post("/api/register", async (req, res) => {
+app.post("/api/register", authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
-
         if (
             typeof email !== "string" ||
-            typeof password !== "string" ||
-            !email.trim() ||
-            password.length < 8
+            typeof password !== "string"
         ) {
             return res.status(400).json({
-                error: "Укажите email и пароль минимум из 8 символов."
+                error: "Email и пароль должны быть строками."
             });
         }
-
         const normalizedEmail = email.trim().toLowerCase();
-
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (
+            !normalizedEmail ||
+            normalizedEmail.length > 255 ||
+            !emailRegex.test(normalizedEmail)
+        ) {
+            return res.status(400).json({
+                error: "Укажите корректный email."
+            });
+        }
+        if (password.length < 8 || password.length > 128) {
+            return res.status(400).json({
+                error: "Пароль должен содержать от 8 до 128 символов."
+            });
+        }
         const [existingUsers] = await db.execute(
             "SELECT id FROM users WHERE email = ? LIMIT 1",
             [normalizedEmail]
         );
-
         if (existingUsers.length > 0) {
             return res.status(409).json({
                 error: "Пользователь с таким email уже существует."
             });
         }
-
         const passwordHash = await bcrypt.hash(password, 12);
-
         const [result] = await db.execute(
             `INSERT INTO users (email, password_hash)
              VALUES (?, ?)`,
             [normalizedEmail, passwordHash]
         );
-
         return res.status(201).json({
             id: result.insertId,
             email: normalizedEmail
         });
-
     } catch (error) {
-        console.error("Ошибка регистрации:", error);
+        if (error.code === "ER_DUP_ENTRY") {
+            return res.status(409).json({
+                error: "Пользователь с таким email уже существует."
+            });
 
+        }
+        console.error("Ошибка регистрации:", error);
         return res.status(500).json({
             error: "Не удалось зарегистрировать пользователя."
         });
     }
 });
 
-app.post("/api/login", async (req, res) => {
+app.post("/api/login", authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -555,13 +575,13 @@ app.post("/api/refresh", async (req, res) => {
         const tokenHash = hashRefreshToken(refreshToken);
 
         const [rows] = await db.execute(
-            `SELECT rt.user_id, u.email
+            `SELECT rt.id, rt.user_id, u.email
              FROM refresh_tokens rt
-             JOIN users u ON u.id = rt.user_id
+                      JOIN users u ON u.id = rt.user_id
              WHERE rt.token_hash = ?
                AND rt.revoked_at IS NULL
                AND rt.expires_at > NOW()
-             LIMIT 1`,
+                 LIMIT 1`,
             [tokenHash]
         );
 
@@ -573,6 +593,23 @@ app.post("/api/refresh", async (req, res) => {
 
         const user = rows[0];
 
+        // Старый refresh token больше использовать нельзя
+        await db.execute(
+            `UPDATE refresh_tokens
+             SET revoked_at = NOW()
+             WHERE id = ?`,
+            [user.id]
+        );
+
+        // Создаём новый refresh token
+        const newRefreshToken = generateRefreshToken();
+
+        await saveRefreshToken(
+            user.user_id,
+            newRefreshToken
+        );
+
+        // Создаём новый короткоживущий access token
         const token = jwt.sign(
             {
                 userId: user.user_id,
@@ -581,6 +618,14 @@ app.post("/api/refresh", async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: "15m" }
         );
+
+        // Заменяем refresh token в HttpOnly cookie
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 30 * 24 * 60 * 60 * 1000
+        });
 
         return res.json({ token });
 

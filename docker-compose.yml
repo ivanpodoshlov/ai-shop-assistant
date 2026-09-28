@@ -21,6 +21,7 @@ services:
 
   app:
     build: .
+    command: sh -c "node migrate.js && node server.js"
     restart: unless-stopped
 
     ports:
@@ -38,6 +39,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mariadb_data:
