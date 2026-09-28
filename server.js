@@ -82,6 +82,39 @@ async function getPrice(productName) {
         currency: rows[0].currency
     };
 }
+async function searchProducts(query = "", inStockOnly = false) {
+    const search = String(query || "").trim();
+
+    let sql = `
+        SELECT name, price, currency, stock
+        FROM products
+        WHERE 1 = 1
+    `;
+
+    const params = [];
+
+    if (search) {
+        sql += " AND LOWER(name) LIKE LOWER(?)";
+        params.push(`%${search}%`);
+    }
+
+    if (inStockOnly) {
+        sql += " AND stock > 0";
+    }
+
+    sql += " ORDER BY name ASC LIMIT 20";
+
+    const [rows] = await db.execute(sql, params);
+
+    return {
+        products: rows.map(product => ({
+            name: product.name,
+            price: Number(product.price),
+            currency: product.currency,
+            stock: product.stock
+        }))
+    };
+}
 async function createOrder(
     productName,
     quantity,
@@ -225,6 +258,12 @@ async function executeTool(name, input) {
         return await getPrice(input.productName);
     }
 
+    if (name === "search_products") {
+        return await searchProducts(
+            input.query,
+            input.inStockOnly
+        );
+    }
     return {
         error: "Неизвестный инструмент"
     };
@@ -257,6 +296,24 @@ const tools = [
                 }
             },
             required: ["productName"]
+        }
+    },
+    {
+        name: "search_products",
+        description: "Найти товары в каталоге. Используй этот инструмент, когда пользователь спрашивает, какие товары есть, что есть в наличии, какие есть модели или товары определённого бренда.",
+        input_schema: {
+            type: "object",
+            properties: {
+                query: {
+                    type: "string",
+                    description: "Поисковый запрос. Например: Samsung, iPhone. Для просмотра всего каталога передай пустую строку."
+                },
+                inStockOnly: {
+                    type: "boolean",
+                    description: "true, если пользователь спрашивает только товары в наличии"
+                }
+            },
+            required: ["query", "inStockOnly"]
         }
     },
     {
@@ -887,22 +944,84 @@ app.post(
 
                 system: `
     Ты AI-агент магазина электроники.
-    
-    Используй инструменты для получения фактических данных.
-    
+
+    ОСНОВНОЕ ПРАВИЛО:
+
+    Все факты об ассортименте магазина получай только через инструменты.
+
+    Никогда не придумывай товары, модели, цены, наличие или возможности магазина.
+
+    РАБОТА С КАТАЛОГОМ:
+
+    1. Если пользователь спрашивает:
+
+       - какие товары есть;
+
+       - что есть в наличии;
+
+       - какие есть телефоны;
+
+       - какие есть Samsung, iPhone или товары другого бренда;
+
+       - просит показать ассортимент;
+
+       используй search_products.
+
+    2. Если пользователь указал только часть названия или бренд,
+
+       например "Samsung" или "iPhone", используй search_products,
+
+       а не придумывай полное название модели.
+
+    3. Если пользователь спрашивает "какие есть?", "а что есть?",
+
+       "покажи ещё" и подобным образом продолжает предыдущий вопрос,
+
+       учитывай контекст предыдущих сообщений.
+
+    4. Если search_products вернул пустой список,
+
+       честно сообщи, что подходящих товаров в каталоге не найдено.
+
+    5. Не предлагай в качестве примеров модели,
+
+       которых не было в результатах инструментов.
+
+    6. Не говори пользователю "посмотрите каталог на сайте",
+
+       "обратитесь к менеджеру" или о других возможностях магазина,
+
+       если таких возможностей нет в полученных данных.
+
+    7. Если пользователь спрашивает о конкретном товаре,
+
+       используй инструменты для проверки фактических данных.
+
+    ОФОРМЛЕНИЕ ЗАКАЗА:
+
     Перед оформлением заказа обязательно:
+
     1. Проверь наличие товара.
+
     2. Получи актуальную цену.
+
     3. Не оформляй заказ, если товара недостаточно.
+
     4. После проверки наличия и цены ОБЯЗАТЕЛЬНО вызови create_order.
+
     5. Самостоятельно текстом подтверждение заказа НЕ запрашивай.
+
     6. Если create_order вернул requiresConfirmation: true,
+
        заказ ЕЩЁ НЕ создан. Сообщи пользователю товар, количество
+
        и стоимость и попроси явно подтвердить заказ.
+
     7. Никогда не говори, что заказ создан, если create_order
+
        не вернул success: true.
-    
-    Не придумывай данные.
+
+    Отвечай кратко и по существу.
     `,
 
                 tools: tools,
