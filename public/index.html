@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Assistant</title>
+</head>
+
+<body>
+
+<h1>AI Assistant</h1>
+
+<div id="auth">
+    <h2>Вход</h2>
+
+    <input
+            id="email"
+            type="email"
+            placeholder="Email"
+    >
+
+    <input
+            id="password"
+            type="password"
+            placeholder="Пароль"
+    >
+
+    <button id="login">
+        Войти
+    </button>
+
+    <button id="register">
+        Зарегистрироваться
+    </button>
+    <button id="logout">
+        Выйти
+    </button>
+    <div id="auth-status"></div>
+</div>
+
+<hr>
+
+<input
+        id="message"
+        type="text"
+        placeholder="Напишите сообщение..."
+>
+
+<button id="send">
+    Отправить
+</button>
+
+<div id="answer" style="white-space: pre-wrap;"></div>
+
+<script src="/vendor/marked/marked.umd.js"></script>
+<script src="/vendor/dompurify/purify.min.js"></script>
+
+<script src="/app.js"></script>
+
+</body>
+</html>
