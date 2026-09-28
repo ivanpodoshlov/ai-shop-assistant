@@ -146,3 +146,11 @@ INSERT INTO products (name, price, currency, stock) VALUES
 ('MacBook Air M4', 1234.00, 'EUR', 0),
 ('Samsung Galaxy S25', 999.00, 'EUR', 6),
 ('iPhone 16', 850.00, 'EUR', 0);
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    filename VARCHAR(255) NOT NULL UNIQUE,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT IGNORE INTO schema_migrations (filename)
+VALUES ('001_initial.sql');
