@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>AI Shop — Admin</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #f7f7f5;
+            color: #181818;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        .page {
+            width: min(100% - 40px, 960px);
+            margin: 0 auto;
+            padding: 48px 0 80px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 56px;
+        }
+
+        .brand {
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+        }
+
+        .back {
+            color: #777;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .back:hover {
+            color: #181818;
+        }
+
+        .title {
+            margin-bottom: 36px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 32px;
+            font-weight: 600;
+            letter-spacing: -0.03em;
+        }
+
+        .subtitle {
+            margin: 0;
+            color: #888;
+            font-size: 15px;
+        }
+
+        .products {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .product {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) 130px 130px 110px;
+            gap: 16px;
+            align-items: center;
+
+            padding: 20px 22px;
+
+            background: #fff;
+            border: 1px solid #ececea;
+            border-radius: 16px;
+        }
+
+        .product-name {
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .category {
+            margin-top: 5px;
+            color: #999;
+            font-size: 13px;
+        }
+
+        .field label {
+            display: block;
+            margin-bottom: 6px;
+            color: #999;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        input {
+            width: 100%;
+            height: 40px;
+            padding: 0 12px;
+
+            border: 1px solid #e3e3e0;
+            border-radius: 10px;
+
+            background: #fafaf8;
+            color: #181818;
+            font: inherit;
+            font-size: 14px;
+
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #aaa;
+            background: #fff;
+        }
+
+        button {
+            height: 40px;
+            margin-top: 17px;
+
+            border: 0;
+            border-radius: 10px;
+
+            background: #181818;
+            color: #fff;
+
+            font: inherit;
+            font-size: 13px;
+            font-weight: 600;
+
+            cursor: pointer;
+        }
+
+        button:hover {
+            opacity: 0.82;
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+
+        .message {
+            min-height: 24px;
+            margin-top: 20px;
+            color: #777;
+            font-size: 13px;
+        }
+
+        .empty {
+            padding: 40px;
+            text-align: center;
+            color: #999;
+            background: #fff;
+            border-radius: 16px;
+        }
+        .title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 24px;
+        }
+
+        .add-product-button {
+            width: auto;
+            padding: 0 18px;
+            margin: 0;
+        }
+
+        .add-product-form {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 90px 1fr 110px;
+            gap: 12px;
+
+            margin-bottom: 24px;
+            padding: 18px;
+
+            background: #fff;
+            border: 1px solid #ececea;
+            border-radius: 16px;
+        }
+
+        .add-product-form[hidden] {
+            display: none;
+        }
+
+        .add-product-form input,
+        .add-product-form select {
+            height: 42px;
+        }
+
+        .add-product-form select {
+            width: 100%;
+            padding: 0 12px;
+
+            border: 1px solid #e3e3e0;
+            border-radius: 10px;
+
+            background: #fafaf8;
+            color: #181818;
+            font: inherit;
+        }
+
+        .add-product-form button {
+            margin: 0;
+            height: 42px;
+        }
+
+        .product-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .product-actions button {
+            width: 100%;
+            margin: 17px 0 0;
+        }
+
+        .product-actions button + button {
+            margin-top: 0;
+            background: transparent;
+            color: #777;
+        }
+
+        @media (max-width: 720px) {
+            .page {
+                width: min(100% - 24px, 960px);
+                padding-top: 28px;
+            }
+
+            header {
+                margin-bottom: 40px;
+            }
+
+            .product {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .product-info {
+                grid-column: 1 / -1;
+            }
+
+            button {
+                margin-top: 17px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="page">
+
+    <header>
+        <div class="brand">AI SHOP</div>
+        <a class="back" href="/">← В магазин</a>
+    </header>
+
+    <main>
+
+        <div class="title title-row">
+            <div>
+                <h1>Товары</h1>
+                <p class="subtitle">
+                    Управление ценами и остатками
+                </p>
+            </div>
+
+            <button id="addProductButton" class="add-product-button">
+                + Добавить товар
+            </button>
+        </div>
+
+        <div id="addProductForm" class="add-product-form" hidden>
+            <input id="newProductName" type="text" placeholder="Название">
+
+            <select id="newProductCategory">
+                <option value="phone">Телефон</option>
+                <option value="laptop">Ноутбук</option>
+                <option value="other">Другое</option>
+            </select>
+
+            <input id="newProductPrice"
+                   type="number"
+                   min="0"
+                   step="0.01"
+                   placeholder="Цена">
+
+            <input id="newProductCurrency"
+                   type="text"
+                   value="EUR"
+                   maxlength="10"
+                   placeholder="Валюта">
+
+            <input id="newProductStock"
+                   type="number"
+                   min="0"
+                   step="1"
+                   placeholder="Остаток">
+
+            <button id="createProductButton">
+                Добавить
+            </button>
+        </div>
+
+        <div id="products" class="products">
+            <div class="empty">Загрузка товаров…</div>
+        </div>
+
+        <div id="message" class="message"></div>
+
+    </main>
+
+</div>
+
+<script src="/admin.js"></script>
+
+</body>
+</html>

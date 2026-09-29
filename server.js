@@ -50,6 +50,7 @@ const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY
 });
 
+
 async function checkStock(productName) {
     const [rows] = await db.execute(
         "SELECT name, stock FROM products WHERE LOWER(name) = LOWER(?) LIMIT 1",
@@ -82,11 +83,34 @@ async function getPrice(productName) {
         currency: rows[0].currency
     };
 }
-async function searchProducts(query = "", inStockOnly = false) {
-    const search = String(query || "").trim();
+async function searchProducts(query = "", inStockOnly = false, category = "") {
+    let search = String(query || "").trim();
+    let productCategory = String(category || "").trim();
+
+    const normalizedSearch = search.toLowerCase();
+
+    if (
+        !productCategory &&
+        (normalizedSearch.includes("ноутбук") ||
+            normalizedSearch.includes("laptop"))
+    ) {
+        productCategory = "laptop";
+        search = "";
+    }
+
+    if (
+        !productCategory &&
+        (normalizedSearch.includes("телефон") ||
+            normalizedSearch.includes("смартфон") ||
+            normalizedSearch.includes("phone") ||
+            normalizedSearch.includes("smartphone"))
+    ) {
+        productCategory = "phone";
+        search = "";
+    }
 
     let sql = `
-        SELECT name, price, currency, stock
+        SELECT name, category, price, currency, stock
         FROM products
         WHERE 1 = 1
     `;
@@ -96,6 +120,11 @@ async function searchProducts(query = "", inStockOnly = false) {
     if (search) {
         sql += " AND LOWER(name) LIKE LOWER(?)";
         params.push(`%${search}%`);
+    }
+
+    if (productCategory) {
+        sql += " AND category = ?";
+        params.push(productCategory);
     }
 
     if (inStockOnly) {
@@ -109,6 +138,7 @@ async function searchProducts(query = "", inStockOnly = false) {
     return {
         products: rows.map(product => ({
             name: product.name,
+            category: product.category,
             price: Number(product.price),
             currency: product.currency,
             stock: product.stock
@@ -261,7 +291,8 @@ async function executeTool(name, input) {
     if (name === "search_products") {
         return await searchProducts(
             input.query,
-            input.inStockOnly
+            input.inStockOnly,
+            input.category
         );
     }
     return {
@@ -300,17 +331,22 @@ const tools = [
     },
     {
         name: "search_products",
-        description: "Найти товары в каталоге. Используй этот инструмент, когда пользователь спрашивает, какие товары есть, что есть в наличии, какие есть модели или товары определённого бренда.",
+        description: "Найти товары в каталоге. Используй этот инструмент, когда пользователь спрашивает, какие товары есть, что есть в наличии, какие есть модели, категории или товары определённого бренда.",
         input_schema: {
             type: "object",
             properties: {
                 query: {
                     type: "string",
-                    description: "Поисковый запрос. Например: Samsung, iPhone. Для просмотра всего каталога передай пустую строку."
+                    description: "Поисковый запрос. Например: Samsung, iPhone. Для просмотра всех товаров подходящей категории передай пустую строку."
                 },
                 inStockOnly: {
                     type: "boolean",
                     description: "true, если пользователь спрашивает только товары в наличии"
+                },
+                category: {
+                    type: "string",
+                    enum: ["phone", "laptop", "other"],
+                    description: "Категория товара. Для запросов о телефонах или смартфонах ОБЯЗАТЕЛЬНО используй phone. Для запросов о ноутбуках ОБЯЗАТЕЛЬНО используй laptop. Если пользователь спрашивает категорию целиком, например 'какие ноутбуки есть?', передавай query как пустую строку и category='laptop'. Если спрашивает 'какие телефоны есть?', передавай query как пустую строку и category='phone'."
                 }
             },
             required: ["query", "inStockOnly"]
@@ -540,7 +576,7 @@ app.post("/api/login", authLimiter, async (req, res) => {
         const normalizedEmail = email.trim().toLowerCase();
 
         const [users] = await db.execute(
-            `SELECT id, email, password_hash
+            `SELECT id, email, password_hash, role
              FROM users
              WHERE email = ?
              LIMIT 1`,
@@ -569,7 +605,8 @@ app.post("/api/login", authLimiter, async (req, res) => {
         const token = jwt.sign(
             {
                 userId: user.id,
-                email: user.email
+                email: user.email,
+                role: user.role
             },
             process.env.JWT_SECRET,
             { expiresIn: "15m" }
@@ -620,6 +657,184 @@ function authenticateToken(req, res, next) {
     }
 }
 
+function requireAdmin(req, res, next) {
+    if (!req.user || req.user.role !== "admin") {
+        return res.status(403).json({
+            error: "Доступ запрещён."
+        });
+    }
+
+    next();
+}
+
+app.get("/api/admin/products", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const [products] = await db.execute(
+            `SELECT id, name, category, price, currency, stock
+             FROM products
+             ORDER BY id ASC`
+        );
+
+        res.json({ products });
+    } catch (error) {
+        console.error("Admin products error:", error);
+
+        res.status(500).json({
+            error: "Не удалось получить список товаров."
+        });
+    }
+});
+
+app.patch("/api/admin/products/:id", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const productId = Number(req.params.id);
+        const { name, category, price, currency, stock } = req.body;
+
+        if (!Number.isInteger(productId) || productId <= 0) {
+            return res.status(400).json({ error: "Некорректный ID товара." });
+        }
+
+        const [currentRows] = await db.execute(
+            `SELECT id, name, category, price, currency, stock
+             FROM products WHERE id = ? LIMIT 1`,
+            [productId]
+        );
+        if (currentRows.length === 0) {
+            return res.status(404).json({ error: "Товар не найден." });
+        }
+
+        const current = currentRows[0];
+        const newName = name === undefined ? current.name : String(name).trim();
+        const newCategory = category === undefined ? current.category : String(category).trim();
+        const newCurrency = currency === undefined ? current.currency : String(currency).trim().toUpperCase();
+        const newPrice = price === undefined ? Number(current.price) : Number(price);
+        const newStock = stock === undefined ? Number(current.stock) : Number(stock);
+
+        if (!newName || newName.length > 255) return res.status(400).json({ error: "Некорректное название." });
+        if (!newCategory || newCategory.length > 50) return res.status(400).json({ error: "Некорректная категория." });
+        if (!newCurrency || newCurrency.length > 10) return res.status(400).json({ error: "Некорректная валюта." });
+        if (!Number.isFinite(newPrice) || newPrice < 0) return res.status(400).json({ error: "Некорректная цена." });
+        if (!Number.isInteger(newStock) || newStock < 0) return res.status(400).json({ error: "Некорректный остаток." });
+
+        const [result] = await db.execute(
+            `UPDATE products
+             SET name = ?, category = ?, price = ?, currency = ?, stock = ?
+             WHERE id = ?`,
+            [newName, newCategory, newPrice, newCurrency, newStock, productId]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                error: "Товар не найден."
+            });
+        }
+
+        const [products] = await db.execute(
+            `SELECT id, name, category, price, currency, stock
+             FROM products
+             WHERE id = ?
+             LIMIT 1`,
+            [productId]
+        );
+
+        res.json({
+            product: products[0]
+        });
+    } catch (error) {
+        console.error("Admin update product error:", error);
+
+        res.status(500).json({
+            error: "Не удалось обновить товар."
+        });
+    }
+});
+
+app.post("/api/admin/products", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { name, category = "other", price, currency = "EUR", stock = 0 } = req.body;
+        const cleanName = typeof name === "string" ? name.trim() : "";
+        const cleanCategory = typeof category === "string" ? category.trim() : "";
+        const cleanCurrency = typeof currency === "string" ? currency.trim().toUpperCase() : "";
+        const newPrice = Number(price);
+        const newStock = Number(stock);
+
+        if (!cleanName || cleanName.length > 255) return res.status(400).json({ error: "Некорректное название." });
+        if (!cleanCategory || cleanCategory.length > 50) return res.status(400).json({ error: "Некорректная категория." });
+        if (!cleanCurrency || cleanCurrency.length > 10) return res.status(400).json({ error: "Некорректная валюта." });
+        if (!Number.isFinite(newPrice) || newPrice < 0) return res.status(400).json({ error: "Некорректная цена." });
+        if (!Number.isInteger(newStock) || newStock < 0) return res.status(400).json({ error: "Некорректный остаток." });
+
+        const [result] = await db.execute(
+            `INSERT INTO products (name, category, price, currency, stock) VALUES (?, ?, ?, ?, ?)`,
+            [cleanName, cleanCategory, newPrice, cleanCurrency, newStock]
+        );
+        const [products] = await db.execute(
+            `SELECT id, name, category, price, currency, stock FROM products WHERE id = ? LIMIT 1`,
+            [result.insertId]
+        );
+        return res.status(201).json({ product: products[0] });
+    } catch (error) {
+        console.error("Admin create product error:", error);
+        return res.status(500).json({ error: "Не удалось добавить товар." });
+    }
+});
+
+app.delete(
+    "/api/admin/products/:id",
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const productId = Number(req.params.id);
+
+            if (!Number.isInteger(productId) || productId <= 0) {
+                return res.status(400).json({
+                    error: "Некорректный ID товара."
+                });
+            }
+
+            const [orders] = await db.execute(
+                "SELECT id FROM orders WHERE product_id = ? LIMIT 1",
+                [productId]
+            );
+
+            if (orders.length > 0) {
+                return res.status(409).json({
+                    error: "Товар нельзя удалить, потому что он есть в истории заказов."
+                });
+            }
+
+            const [result] = await db.execute(
+                "DELETE FROM products WHERE id = ?",
+                [productId]
+            );
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({
+                    error: "Товар не найден."
+                });
+            }
+
+            return res.json({
+                success: true
+            });
+
+        } catch (error) {
+            console.error("Admin delete product error:", error);
+
+            if (error.code === "ER_ROW_IS_REFERENCED_2") {
+                return res.status(409).json({
+                    error: "Нельзя удалить товар: по нему уже есть заказы."
+                });
+            }
+
+            return res.status(500).json({
+                error: "Не удалось удалить товар."
+            });
+        }
+    }
+);
+
 app.post("/api/refresh", async (req, res) => {
     try {
         const refreshToken = req.cookies.refreshToken;
@@ -633,7 +848,7 @@ app.post("/api/refresh", async (req, res) => {
         const tokenHash = hashRefreshToken(refreshToken);
 
         const [rows] = await db.execute(
-            `SELECT rt.id, rt.user_id, u.email
+            `SELECT rt.id, rt.user_id, u.email, u.role
              FROM refresh_tokens rt
                       JOIN users u ON u.id = rt.user_id
              WHERE rt.token_hash = ?
@@ -671,7 +886,8 @@ app.post("/api/refresh", async (req, res) => {
         const token = jwt.sign(
             {
                 userId: user.user_id,
-                email: user.email
+                email: user.email,
+                role: user.role
             },
             process.env.JWT_SECRET,
             { expiresIn: "15m" }
@@ -832,7 +1048,13 @@ app.post(
         const confirmationWords = [
             "да",
             "подтверждаю",
-            "подтвердить"
+            "подтвердить",
+            "да, подтверждаю",
+            "ок",
+            "окей",
+            "оформляй",
+            "беру",
+            "давай"
         ];
         const isConfirmation = confirmationWords.includes(
             message.toLowerCase().trim()
@@ -886,14 +1108,11 @@ app.post(
             await saveMessage(sessionId, "user", message);
 
             const confirmationText =
-                `Заказ успешно создан! ✅
-                **Детали заказа:**
-                - 📦 Номер заказа: ${result.orderId}
-                - 📱 Товар: ${result.productName}
-                - 🔢 Количество: ${result.quantity} шт.
-                - 💰 Сумма: ${result.total} ${result.currency}
-                
-                Спасибо за покупку!`;
+                `Заказ успешно создан.\n\n` +
+                `Номер заказа: ${result.orderId}\n` +
+                `Товар: ${result.productName}\n` +
+                `Количество: ${result.quantity} шт.\n` +
+                `Сумма: ${result.total} ${result.currency}`;
 
             session.conversation.push(
                 {
@@ -913,7 +1132,15 @@ app.post(
             );
 
             return res.json({
-                answer: confirmationText
+                answer: confirmationText,
+                type: "order_success",
+                order: {
+                    orderId: result.orderId,
+                    productName: result.productName,
+                    quantity: result.quantity,
+                    total: result.total,
+                    currency: result.currency
+                }
             });
         }
 
@@ -934,6 +1161,9 @@ app.post(
             }
         ];
 
+        const catalogQuestion = /(каталог|ассортимент|товар|модел|бренд|телефон|смартфон|ноутбук|iphone|samsung|macbook|налич|склад|цена|стоим)/i.test(message);
+        let catalogCheckedThisTurn = false;
+
         for (let step = 1; step <= 10; step++) {
 
             console.log(`\n--- Шаг агента ${step} ---`);
@@ -951,6 +1181,18 @@ app.post(
 
     Никогда не придумывай товары, модели, цены, наличие или возможности магазина.
 
+    КРИТИЧЕСКОЕ ПРАВИЛО:
+
+    На ЛЮБОЙ вопрос пользователя об ассортименте, наличии товаров,
+    
+    категориях, брендах или моделях ОБЯЗАТЕЛЬНО вызывай search_products
+    
+    в текущем сообщении.
+
+    Никогда не отвечай на такой вопрос только на основании истории диалога,
+    
+    предыдущих результатов инструментов или собственных знаний.
+    
     РАБОТА С КАТАЛОГОМ:
 
     1. Если пользователь спрашивает:
@@ -997,6 +1239,32 @@ app.post(
 
        используй инструменты для проверки фактических данных.
 
+    8. Если пользователь спрашивает о телефонах, смартфонах
+
+       или моделях телефонов, используй search_products
+
+       с category="phone".
+
+    9. Если пользователь спрашивает о ноутбуках,
+
+       используй search_products с category="laptop".
+       
+       Если пользователь спрашивает, какие товары "есть",
+       
+        это означает наличие товаров в каталоге, а не наличие на складе.
+
+        Используй inStockOnly=true только если пользователь явно спрашивает
+        
+        "в наличии", "на складе", "можно купить сейчас" или аналогично.
+
+    10. Если пользователь спрашивает весь каталог
+
+        без указания типа товара, не передавай category.
+
+    11. Не определяй ассортимент по своим знаниям.
+
+        Категория только ограничивает поиск по реальным товарам из базы.
+
     ОФОРМЛЕНИЕ ЗАКАЗА:
 
     Перед оформлением заказа обязательно:
@@ -1025,6 +1293,9 @@ app.post(
     `,
 
                 tools: tools,
+                ...(catalogQuestion && !catalogCheckedThisTurn
+                    ? { tool_choice: { type: "tool", name: "search_products" } }
+                    : {}),
                 messages: messages
             });
 
@@ -1040,6 +1311,14 @@ app.post(
             // Если Claude больше не вызывает инструменты —
             // значит он сформировал финальный ответ.
             if (toolUses.length === 0) {
+                if (catalogQuestion && !catalogCheckedThisTurn) {
+                    messages.push({
+                        role: "user",
+                        content: "Перед финальным ответом обязательно проверь актуальный каталог через search_products. Не делай вывод об ассортименте из истории или собственных знаний."
+                    });
+                    continue;
+                }
+
                 if (
                     !session.pendingOrder &&
                     /подтверждаете заказ|подтвердите заказ/i.test(
@@ -1085,6 +1364,9 @@ app.post(
             }
             const toolResults = [];
             for (const toolUse of toolUses) {
+                if (toolUse.name === "search_products") {
+                    catalogCheckedThisTurn = true;
+                }
                 console.log(
                     "Claude вызывает:",
                     toolUse.name,
@@ -1092,6 +1374,30 @@ app.post(
                 );
                 let result;
                 if (toolUse.name === "create_order") {
+                    const quantity = Number(toolUse.input.quantity);
+                    if (!Number.isInteger(quantity) || quantity <= 0) {
+                        result = { error: "Количество должно быть положительным целым числом" };
+                        toolResults.push({
+                            type: "tool_result",
+                            tool_use_id: toolUse.id,
+                            content: JSON.stringify(result)
+                        });
+                        continue;
+                    }
+
+                    const stockInfo = await checkStock(toolUse.input.productName);
+                    if (stockInfo.error || stockInfo.stock < quantity) {
+                        result = stockInfo.error
+                            ? { error: stockInfo.error }
+                            : { error: "Недостаточно товара на складе", available: stockInfo.stock };
+                        toolResults.push({
+                            type: "tool_result",
+                            tool_use_id: toolUse.id,
+                            content: JSON.stringify(result)
+                        });
+                        continue;
+                    }
+
                     const priceInfo = await getPrice(
                         toolUse.input.productName
                     );
@@ -1108,7 +1414,7 @@ app.post(
                     }
                     session.pendingOrder = {
                         productName: toolUse.input.productName,
-                        quantity: toolUse.input.quantity,
+                        quantity,
                         price: priceInfo.price,
                         currency: priceInfo.currency,
                         idempotencyKey: crypto.randomUUID(),
@@ -1123,7 +1429,7 @@ app.post(
                         requiresConfirmation: true,
                         message: "Заказ ожидает подтверждения пользователя",
                         productName: toolUse.input.productName,
-                        quantity: toolUse.input.quantity
+                        quantity
                     };
 
                 } else {
