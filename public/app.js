@@ -9,6 +9,7 @@ const auth = document.getElementById("auth");
 const chat = document.querySelector(".chat");
 const welcome = document.querySelector(".welcome");
 const accountLabel = document.getElementById("account-label");
+const adminLink = document.getElementById("admin-link");
 const accountLogout = document.getElementById("account-logout");
 
 const input = document.getElementById("message");
@@ -17,6 +18,17 @@ const answer = document.getElementById("answer");
 
 let accessToken = null;
 let currentEmail = "";
+function getUserRole(token) {
+    try {
+        const payload = JSON.parse(
+            atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))
+        );
+
+        return payload.role || "user";
+    } catch {
+        return "user";
+    }
+}
 
 function showLoggedOut() {
     auth.style.display = "block";
@@ -29,6 +41,7 @@ function showLoggedIn(email = "") {
 
     currentEmail = email || currentEmail;
     accountLabel.textContent = currentEmail || "Вы вошли";
+    adminLink.hidden = getUserRole(accessToken) !== "admin";
 }
 
 function addMessage(role, content, isHtml = false) {
