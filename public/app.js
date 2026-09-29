@@ -254,6 +254,7 @@ async function performLogout() {
 
         accessToken = null;
         currentEmail = "";
+        localStorage.removeItem("accessToken");
         localStorage.removeItem("sessionId");
 
         answer.innerHTML = "";
